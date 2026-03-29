@@ -4,7 +4,7 @@ data/camvid.py
 CamVid Dataset loader.
 
 CamVid 디렉토리 구조 (실제 다운로드 기준):
-    datasets/CamVid/
+    datasets/camVid/
     ├── train/          *.png   (이미지)
     ├── train_labels/   *.png   (RGB palette mask, 이미지와 동일 파일명)
     ├── val/            *.png
@@ -150,18 +150,27 @@ class CamVidDataset(Dataset):
         # 대응하는 mask 경로 생성
         # 실제 CamVid 다운로드 구조:
         #   train/0001TP_009210.png  →  train_labels/0001TP_009210_L.png
-        # 이미지 stem에 "_L" 접미사가 붙은 형태.
+        # 라벨이 없는 이미지(공백·괄호 포함 파일 등)는 조용히 스킵한다.
         self.mask_paths = []
+        skipped = []
         for img_path in self.image_paths:
-            mask_name = img_path.stem + "_L" + mask_suffix   # e.g. 0001TP_009210_L.png
+            mask_name = img_path.stem + "_L" + mask_suffix
             mask_path = self.label_dir / mask_name
             if mask_path.exists():
                 self.mask_paths.append(mask_path)
             else:
-                raise FileNotFoundError(
-                    f"Mask not found for {img_path.name} in {label_dir}\n"
-                    f"  Expected: {mask_path}"
-                )
+                skipped.append(img_path.name)
+
+        # 라벨 없는 이미지는 image_paths에서도 제거 (1:1 대응 유지)
+        if skipped:
+            print(f"[CamVidDataset] {len(skipped)}개 이미지 스킵 (라벨 없음): {skipped[:3]}{'...' if len(skipped) > 3 else ''}")
+            self.image_paths = [
+                p for p in self.image_paths
+                if (self.label_dir / (p.stem + "_L" + mask_suffix)).exists()
+            ]
+
+        assert len(self.image_paths) == len(self.mask_paths), \
+            "image / mask 수가 일치하지 않습니다."
 
         assert len(self.image_paths) == len(self.mask_paths), \
             "image / mask 수가 일치하지 않습니다."
