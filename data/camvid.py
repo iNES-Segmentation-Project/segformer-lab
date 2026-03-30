@@ -4,7 +4,7 @@ data/camvid.py
 CamVid Dataset loader.
 
 CamVid 디렉토리 구조 (실제 다운로드 기준):
-    datasets/camVid/
+    datasets/CamVid/
     ├── train/          *.png   (이미지)
     ├── train_labels/   *.png   (RGB palette mask, 이미지와 동일 파일명)
     ├── val/            *.png
@@ -30,9 +30,6 @@ RGB palette mask → class index 변환:
     CamVid의 label 이미지는 RGB 컬러로 저장되어 있다.
     각 pixel의 RGB 값을 CLASS_MAP으로 lookup해서 class index로 변환한다.
 
-class_dict.csv:
-    다운로드 시 포함된 class_dict.csv는 색상표 참고용이며,
-    본 코드에서는 CAMVID_COLORMAP에 직접 하드코딩되어 있으므로 사용하지 않아도 된다.
 """
 
 import os
@@ -47,38 +44,91 @@ from torch import Tensor
 from torch.utils.data import Dataset
 
 
-# ── CamVid 11-class RGB palette ───────────────────────────────────────────────
-# (R, G, B) → class index
-# 출처: SegNet/CamVid 공식 color map
-CAMVID_COLORMAP: List[Tuple[int, int, int]] = [
-    (128, 128, 128),   # 0  Sky
-    (128,   0,   0),   # 1  Building
-    (192, 192, 128),   # 2  Pole
-    (128,  64, 128),   # 3  Road
-    (60,  40, 222),    # 4  Pavement
-    (128, 128,   0),   # 5  Tree
-    (192, 128, 128),   # 6  SignSymbol
-    ( 64,  64, 128),   # 7  Fence
-    ( 64,   0, 128),   # 8  Car
-    ( 64,  64,   0),   # 9  Pedestrian
-    (  0, 128, 192),   # 10 Bicyclist
-]
+# ── class_dict.csv 기준 32개 원본 클래스 RGB값 ────────────────────────────────
+# (R, G, B) → 32-class index
+# 출처: datasets/CamVid/class_dict.csv (정확한 값)
+_RAW_COLORMAP = {
+    # name              R    G    B     32-class idx
+    "Animal":        ( 64, 128,  64),  # 0
+    "Archway":       (192,   0, 128),  # 1
+    "Bicyclist":     (  0, 128, 192),  # 2
+    "Bridge":        (  0, 128,  64),  # 3
+    "Building":      (128,   0,   0),  # 4
+    "Car":           ( 64,   0, 128),  # 5
+    "CartLuggagePram":(64,   0, 192),  # 6
+    "Child":         (192, 128,  64),  # 7
+    "Column_Pole":   (192, 192, 128),  # 8
+    "Fence":         ( 64,  64, 128),  # 9
+    "LaneMkgsDriv":  (128,   0, 192),  # 10
+    "LaneMkgsNonDriv":(192,  0,  64),  # 11
+    "Misc_Text":     (128, 128,  64),  # 12
+    "MotorcycleScooter":(192,0, 192),  # 13
+    "OtherMoving":   (128,  64,  64),  # 14
+    "ParkingBlock":  ( 64, 192, 128),  # 15
+    "Pedestrian":    ( 64,  64,   0),  # 16
+    "Road":          (128,  64, 128),  # 17
+    "RoadShoulder":  (128, 128, 192),  # 18
+    "Sidewalk":      (  0,   0, 192),  # 19  ← Pavement (실제 색상)
+    "SignSymbol":    (192, 128, 128),  # 20
+    "Sky":           (128, 128, 128),  # 21
+    "SUVPickupTruck":( 64, 128, 192),  # 22
+    "TrafficCone":   (  0,   0,  64),  # 23
+    "TrafficLight":  (  0,  64,  64),  # 24
+    "Train":         (192,  64, 128),  # 25
+    "Tree":          (128, 128,   0),  # 26
+    "Truck_Bus":     (192, 128, 192),  # 27
+    "Tunnel":        ( 64,   0,  64),  # 28
+    "VegetationMisc":(192, 192,   0),  # 29
+    "Void":          (  0,   0,   0),  # → IGNORE
+    "Wall":          ( 64, 192,   0),  # 30
+}
 
-NUM_CLASSES = 11
+# ── 32 → 11 클래스 매핑 (SegNet 논문 기준) ────────────────────────────────────
+#
+# 11-class index:
+#   0  Sky
+#   1  Building
+#   2  Pole
+#   3  Road
+#   4  Pavement (Sidewalk)
+#   5  Tree
+#   6  SignSymbol
+#   7  Fence
+#   8  Car
+#   9  Pedestrian
+#  10  Bicyclist
+# 255  Void / ignore
+#
+_NAME_TO_11CLASS = {
+    "Sky":              0,
+    "Building":         1,  "Wall": 1, "Archway": 1, "Tunnel": 1, "Bridge": 1,
+    "Column_Pole":      2,  "TrafficLight": 2, "TrafficCone": 2,
+    "Road":             3,  "LaneMkgsDriv": 3, "LaneMkgsNonDriv": 3, "RoadShoulder": 3,
+    "Sidewalk":         4,  "ParkingBlock": 4,
+    "Tree":             5,  "VegetationMisc": 5,
+    "SignSymbol":       6,  "Misc_Text": 6,
+    "Fence":            7,
+    "Car":              8,  "SUVPickupTruck": 8, "Truck_Bus": 8, "Train": 8,
+                            "OtherMoving": 8, "MotorcycleScooter": 8,
+                            "CartLuggagePram": 8,
+    "Pedestrian":       9,  "Child": 9, "Animal": 9,
+    "Bicyclist":       10,
+    "Void":           255,
+}
+
+NUM_CLASSES  = 11
 IGNORE_INDEX = 255
 
 
-def _build_color_lookup() -> np.ndarray:
+def _build_color_lookup() -> dict:
     """
-    RGB → class index lookup table.
-    shape: (256, 256, 256) — uint8, 값: class index 또는 IGNORE_INDEX
-
-    메모리 절약을 위해 실제로는 (R//8, G//8, B//8) 축소 테이블을 쓰지 않고
-    dictionary lookup 방식을 사용한다.
+    RGB → 11-class index lookup table 생성.
+    class_dict.csv의 정확한 RGB값 사용.
     """
     table = {}
-    for idx, rgb in enumerate(CAMVID_COLORMAP):
-        table[rgb] = idx
+    for name, rgb in _RAW_COLORMAP.items():
+        cls11 = _NAME_TO_11CLASS.get(name, IGNORE_INDEX)
+        table[rgb] = cls11
     return table
 
 
@@ -88,20 +138,51 @@ _COLOR_TABLE = _build_color_lookup()
 
 def _rgb_mask_to_index(mask_rgb: np.ndarray) -> np.ndarray:
     """
-    RGB mask (H, W, 3) → class index mask (H, W), dtype=int64.
-    알 수 없는 색상은 IGNORE_INDEX(255)로 처리.
+    RGB mask (H, W, 3) → 11-class index mask (H, W), dtype=int64.
+
+    JPEG 압축 등으로 인해 픽셀값에 ±수 정도의 오차가 있을 수 있으므로
+    정확히 일치하는 색상이 없으면 L2 거리가 가장 가까운 색상으로 매핑한다.
+
+    알 수 없는 색상(Void)은 IGNORE_INDEX(255)로 처리.
     """
     H, W, _ = mask_rgb.shape
     index_mask = np.full((H, W), IGNORE_INDEX, dtype=np.int64)
 
+    # ── Step 1: 정확히 일치하는 픽셀 먼저 처리 (빠름) ───────────────────────
     for rgb, cls_idx in _COLOR_TABLE.items():
-        # 각 채널이 모두 일치하는 pixel을 찾아 class index 할당
         match = (
             (mask_rgb[:, :, 0] == rgb[0]) &
             (mask_rgb[:, :, 1] == rgb[1]) &
             (mask_rgb[:, :, 2] == rgb[2])
         )
         index_mask[match] = cls_idx
+
+    # ── Step 2: 미매핑 픽셀 → nearest color 매핑 (JPEG 노이즈 처리) ─────────
+    unmatched = index_mask == IGNORE_INDEX
+
+    # Void(0,0,0) 픽셀은 실제 void이므로 제외
+    void_mask = (
+        (mask_rgb[:, :, 0] == 0) &
+        (mask_rgb[:, :, 1] == 0) &
+        (mask_rgb[:, :, 2] == 0)
+    )
+    unmatched = unmatched & ~void_mask
+
+    if unmatched.any():
+        # 팔레트 색상 배열: (num_colors, 3)
+        palette_rgb = np.array(list(_COLOR_TABLE.keys()), dtype=np.int32)   # (C, 3)
+        palette_cls = np.array(list(_COLOR_TABLE.values()), dtype=np.int64) # (C,)
+
+        # 미매핑 픽셀 추출: (N, 3)
+        unmatched_pixels = mask_rgb[unmatched].astype(np.int32)  # (N, 3)
+
+        # L2 거리 계산: (N, C)
+        diff = unmatched_pixels[:, None, :] - palette_rgb[None, :, :]  # (N, C, 3)
+        dist = (diff ** 2).sum(axis=2)                                  # (N, C)
+
+        # 가장 가까운 색상 index
+        nearest = dist.argmin(axis=1)                                   # (N,)
+        index_mask[unmatched] = palette_cls[nearest]
 
     return index_mask  # (H, W), values ∈ {0..10, 255}
 
