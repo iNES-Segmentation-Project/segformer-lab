@@ -1,0 +1,52 @@
+# configs/e0_paperlike.yaml
+#
+# E5용 Paper-like 설정 템플릿 (CLAUDE.md Step 2 기준)
+# ────────────────────────────────────────────────────
+# E0~E4 내부 실험 완료 후, 최고 구조에 이 설정을 적용한다.
+# 필요 시 e5_best.yaml로 rename 후 model_type / loss_type 수정.
+#
+# pretrained_path 준비 방법:
+#   - 우리 체크포인트 사용:  weights/e0_mlp_ce_internal_best.pth  (train.py 저장 형식)
+#   - encoder-only 파일 사용: stages.* 키로 구성된 state_dict
+
+exp_name: e0_mlp_ce_paperlike
+
+# ── Model ─────────────────────────────────────────────────────────────────────
+model_type:  mlp
+num_classes: 11
+embed_dim:   256
+dropout:     0.1
+pretrained:  true
+# pretrained_path: external MiT-B0 backbone weight (encoder-only 또는 full model 체크포인트)
+# 지원 형식:
+#   (1) encoder-only state_dict  → keys: "stages.*"
+#   (2) 우리 train.py 체크포인트 → keys: "encoder.stages.*"  (ckpt["model"] 기준)
+# 준비 방법: HuggingFace 등에서 받은 공식 MiT-B0 가중치를 변환하거나,
+#           encoder만 추출한 별도 파일을 생성해서 경로 지정.
+pretrained_path: weights/mit_b0_backbone.pth  # ← 실제 파일 경로로 교체 필요
+
+# ── Loss ──────────────────────────────────────────────────────────────────────
+loss_type: ce
+
+# ── Data ──────────────────────────────────────────────────────────────────────
+input_size:        [512, 512]   # (H, W)
+augmentation_type: paperlike    # basic | paperlike
+num_workers:       4
+
+train_img_dir: datasets/CamVid/train
+train_lbl_dir: datasets/CamVid/train_labels
+val_img_dir:   datasets/CamVid/val
+val_lbl_dir:   datasets/CamVid/val_labels
+
+# ── Training ──────────────────────────────────────────────────────────────────
+batch_size:   4
+epochs:       160
+lr:           6.0e-5
+weight_decay: 0.01
+
+# ── Scheduler ─────────────────────────────────────────────────────────────────
+scheduler_type: warmup_poly
+warmup_ratio:   0.1
+
+# ── Output ────────────────────────────────────────────────────────────────────
+save_dir: weights

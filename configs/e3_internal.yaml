@@ -1,0 +1,39 @@
+# configs/e3_internal.yaml
+#
+# E3 Internal — MLP decoder + CE+Dice loss
+# E0 대비 변경: loss_type=ce_dice, exp_name
+# 나머지 모든 조건은 E0와 동일
+
+exp_name: e3_mlp_cedice_internal
+
+# ── Model ─────────────────────────────────────────────────────────────────────
+model_type:  mlp
+num_classes: 11
+embed_dim:   256
+dropout:     0.1
+pretrained:  false
+
+# ── Loss ──────────────────────────────────────────────────────────────────────
+loss_type: ce_dice      # ce | focal | ce_dice | ce_boundary  ← E0와 다름
+
+# ── Data ──────────────────────────────────────────────────────────────────────
+input_size:        [360, 480]
+augmentation_type: basic
+num_workers:       2
+
+train_img_dir: datasets/CamVid/train
+train_lbl_dir: datasets/CamVid/train_labels
+val_img_dir:   datasets/CamVid/val
+val_lbl_dir:   datasets/CamVid/val_labels
+
+# ── Training ──────────────────────────────────────────────────────────────────
+batch_size:   4
+epochs:       40
+lr:           6.0e-5
+weight_decay: 0.01
+
+# ── Scheduler ─────────────────────────────────────────────────────────────────
+scheduler_type: poly
+
+# ── Output ────────────────────────────────────────────────────────────────────
+save_dir: weights

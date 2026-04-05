@@ -1,0 +1,39 @@
+# configs/e1_internal.yaml
+#
+# E1 Internal — FPN decoder + CE loss
+# E0 대비 변경: model_type=fpn, exp_name
+# 나머지 모든 조건은 E0와 동일
+
+exp_name: e1_fpn_ce_internal
+
+# ── Model ─────────────────────────────────────────────────────────────────────
+model_type:  fpn        # mlp | fpn  ← E0와 다름
+num_classes: 11
+embed_dim:   256
+dropout:     0.1
+pretrained:  false
+
+# ── Loss ──────────────────────────────────────────────────────────────────────
+loss_type: ce
+
+# ── Data ──────────────────────────────────────────────────────────────────────
+input_size:        [360, 480]
+augmentation_type: basic
+num_workers:       2
+
+train_img_dir: datasets/CamVid/train
+train_lbl_dir: datasets/CamVid/train_labels
+val_img_dir:   datasets/CamVid/val
+val_lbl_dir:   datasets/CamVid/val_labels
+
+# ── Training ──────────────────────────────────────────────────────────────────
+batch_size:   4
+epochs:       40
+lr:           6.0e-5
+weight_decay: 0.01
+
+# ── Scheduler ─────────────────────────────────────────────────────────────────
+scheduler_type: poly
+
+# ── Output ────────────────────────────────────────────────────────────────────
+save_dir: weights

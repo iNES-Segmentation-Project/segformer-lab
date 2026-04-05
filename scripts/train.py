@@ -1,13 +1,17 @@
 """
 scripts/train.py
 
-SegFormer-B0 baseline (E0: MLP decoder + CrossEntropy) — CamVid 학습 스크립트.
+SegFormer-B0 학습 스크립트 — config 기반.
 
 실행:
-    python scripts/train.py
+    python scripts/train.py --config configs/e0_internal.yaml
+    python scripts/train.py --config configs/e0_paperlike.yaml
 
 디렉토리 구조 :
     segformer-core/
+    ├── configs/
+    │   ├── e0_internal.yaml
+    │   └── e0_paperlike.yaml
     ├── data/
     │   ├── Camvid/
     │   │   ├── images/
@@ -25,9 +29,12 @@ SegFormer-B0 baseline (E0: MLP decoder + CrossEntropy) — CamVid 학습 스크�
 import sys
 import os
 import time
+import argparse
 from pathlib import Path
 
+import yaml
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
@@ -36,44 +43,201 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from data.camvid import CamVidDataset, NUM_CLASSES, IGNORE_INDEX
-from data.transforms import SegTransform
-from models.segformer import build_segformer_b0
+from data.transforms import build_transform
+from models.segformer import build_segformer_b0, build_segformer_b0_fpn
 from models.loss.cross_entropy import CrossEntropyLoss
+from models.loss.focal_loss import FocalLoss
+from models.loss.combined_loss import CombinedLoss
 
 
 # =============================================================================
-# ── 하드코딩 설정값 (argparse 없이 직접 수정해서 사용) ──────────────────────
+# ── Config 로드 ───────────────────────────────────────────────────────────────
 # =============================================================================
 
-CFG = {
-    # ── 데이터 경로 ────────────────────────────────────────────────────────────
-    # 실제 폴더 구조: datasets/camVid/train/, datasets/camVid/train_labels/, ...
-    "train_img_dir":   str(ROOT / "datasets" / "CamVid" / "train"),
-    "train_lbl_dir":   str(ROOT / "datasets" / "CamVid" / "train_labels"),
-    "val_img_dir":     str(ROOT / "datasets" / "CamVid" / "val"),
-    "val_lbl_dir":     str(ROOT / "datasets" / "CamVid" / "val_labels"),
+def load_config(config_path: str) -> dict:
+    """yaml 파일을 읽어 dict로 반환. 경로는 ROOT 기준 상대경로 허용."""
+    path = Path(config_path)
+    if not path.is_absolute():
+        path = ROOT / path
+    with open(path, "r", encoding="utf-8") as f:
+        cfg = yaml.safe_load(f)
 
-    # ── 입력 해상도 (H, W) ─────────────────────────────────────────────────────
-    # CamVid 원본: 720×960 → 학습 시 절반으로 줄이는 것이 일반적
-    "input_size":      (360, 480),
+    # 데이터/가중치 경로를 절대경로로 변환
+    for key in ("train_img_dir", "train_lbl_dir", "val_img_dir", "val_lbl_dir",
+                "save_dir", "pretrained_path"):
+        if key in cfg and cfg[key]:
+            p = Path(cfg[key])
+            if not p.is_absolute():
+                cfg[key] = str(ROOT / p)
 
-    # ── 학습 설정 ──────────────────────────────────────────────────────────────
-    "num_classes":     NUM_CLASSES,   # 11
-    "ignore_index":    IGNORE_INDEX,  # 255
-    "epochs":          40,
-    "batch_size":      4,
-    "num_workers":     2,
-    "lr":              6e-5,          # SegFormer 논문 권장값
-    "weight_decay":    0.01,
+    # input_size: list → tuple
+    if "input_size" in cfg:
+        cfg["input_size"] = tuple(cfg["input_size"])
 
-    # ── 모델 설정 ──────────────────────────────────────────────────────────────
-    "embed_dim":       256,           # MLP decoder 채널 수
-    "dropout":         0.1,
+    # 기본값 보완
+    cfg.setdefault("num_classes",  NUM_CLASSES)
+    cfg.setdefault("ignore_index", IGNORE_INDEX)
+    cfg.setdefault("embed_dim",    256)
+    cfg.setdefault("dropout",      0.1)
+    cfg.setdefault("num_workers",  2)
+    cfg.setdefault("warmup_ratio", 0.1)
 
-    # ── 저장 경로 ──────────────────────────────────────────────────────────────
-    "save_dir":        str(ROOT / "weights"),
-    "exp_name":        "e0_mlp_ce",   # 실험 이름 (E0 baseline)
-}
+    return cfg
+
+
+# =============================================================================
+# ── 팩토리 함수 ───────────────────────────────────────────────────────────────
+# =============================================================================
+
+def load_pretrained_encoder(model: nn.Module, weight_path: str) -> None:
+    """
+    encoder에만 pretrained 가중치를 로드.
+    decoder / segmentation head는 로드하지 않음.
+
+    지원 형식:
+      1. 우리 full model 체크포인트 (train.py 저장 형식)
+         → ckpt["model"] 에서 "encoder.*" 키만 추출 후 prefix 제거
+      2. encoder-only state_dict
+         → keys가 "stages.*" 로 시작하면 그대로 사용
+
+    MMSeg backbone 형식 ("backbone.*")은 미지원 — 키 변환 필요.
+    """
+    path = Path(weight_path)
+    if not path.exists():
+        raise FileNotFoundError(
+            f"[pretrained] 가중치 파일 없음: {path}\n"
+            "  config의 pretrained_path 경로를 확인하세요."
+        )
+
+    ckpt = torch.load(str(path), map_location="cpu")
+
+    # ── checkpoint wrapper 처리 ────────────────────────────────────────────────
+    # train.py가 저장하는 형식: {"epoch": ..., "model": {...}, "optimizer": ...}
+    if isinstance(ckpt, dict) and "model" in ckpt:
+        state_dict = ckpt["model"]
+    elif isinstance(ckpt, dict) and "state_dict" in ckpt:
+        state_dict = ckpt["state_dict"]
+    else:
+        state_dict = ckpt  # 이미 state_dict
+
+    # ── key 형식 감지 및 정규화 (전체 키 기준) ───────────────────────────────
+    all_keys = list(state_dict.keys())
+
+    has_encoder_prefix  = any(k.startswith("encoder.")  for k in all_keys)
+    has_backbone_prefix = any(k.startswith("backbone.") for k in all_keys)
+
+    if has_encoder_prefix:
+        # 형식 1: full model state_dict → encoder 키만 추출 후 prefix 제거
+        state_dict = {
+            k[len("encoder."):]: v
+            for k, v in state_dict.items()
+            if k.startswith("encoder.")
+        }
+    elif has_backbone_prefix:
+        raise ValueError(
+            "[pretrained] MMSeg backbone 형식('backbone.*')은 미지원.\n"
+            "  지원 형식: (1) 우리 체크포인트의 'encoder.*' 키\n"
+            "             (2) encoder-only state_dict의 'stages.*' 키"
+        )
+    # else: 형식 2 — 이미 encoder-only ('stages.*'), 그대로 사용
+
+    # ── encoder에만 로드 (decoder 키는 state_dict에 없으므로 자동 제외) ────────
+    missing, unexpected = model.encoder.load_state_dict(state_dict, strict=False)
+
+    print(f"  [pretrained] 로드 완료: {path.name}")
+    if not missing and not unexpected:
+        print("  [pretrained] 모든 encoder 키 정상 로드.")
+    if missing:
+        print(f"  [pretrained] Missing keys  ({len(missing)}): "
+              f"{missing[:3]}{'...' if len(missing) > 3 else ''}")
+    if unexpected:
+        print(f"  [pretrained] Unexpected keys ({len(unexpected)}): "
+              f"{unexpected[:3]}{'...' if len(unexpected) > 3 else ''}")
+
+
+def build_model(cfg: dict) -> nn.Module:
+    """model_type에 따라 SegFormer 모델을 생성. pretrained=true 이면 encoder에만 가중치 로드."""
+    model_type = cfg.get("model_type", "mlp")
+
+    if model_type == "mlp":
+        model = build_segformer_b0(
+            num_classes=cfg["num_classes"],
+            embed_dim=cfg["embed_dim"],
+            dropout=cfg["dropout"],
+        )
+    elif model_type == "fpn":
+        model = build_segformer_b0_fpn(
+            num_classes=cfg["num_classes"],
+            fpn_dim=cfg["embed_dim"],
+            dropout=cfg["dropout"],
+        )
+    else:
+        raise ValueError(f"Unknown model_type: '{model_type}'. Choose 'mlp' or 'fpn'.")
+
+    # ── pretrained encoder 로드 (E5 / paperlike 전용) ─────────────────────────
+    # pretrained=false 이면 이 블록 전체를 건너뜀 → E0~E4에 영향 없음
+    if cfg.get("pretrained", False):
+        pretrained_path = cfg.get("pretrained_path", "")
+        if not pretrained_path:
+            raise ValueError(
+                "[pretrained] pretrained=true이지만 pretrained_path가 비어 있습니다.\n"
+                "  config에 pretrained_path: <path/to/weights.pth> 를 추가하세요."
+            )
+        load_pretrained_encoder(model, pretrained_path)
+
+    return model
+
+
+def build_criterion(cfg: dict) -> nn.Module:
+    """loss_type에 따라 loss 함수를 생성."""
+    loss_type    = cfg.get("loss_type", "ce")
+    ignore_index = cfg["ignore_index"]
+    num_classes  = cfg["num_classes"]
+
+    if loss_type == "ce":
+        return CrossEntropyLoss(ignore_index=ignore_index)
+    elif loss_type == "focal":
+        return FocalLoss(ignore_index=ignore_index)
+    elif loss_type == "ce_dice":
+        return CombinedLoss(mode="ce+dice", num_classes=num_classes, ignore_index=ignore_index)
+    elif loss_type == "ce_boundary":
+        return CombinedLoss(mode="ce+boundary", num_classes=num_classes, ignore_index=ignore_index)
+    else:
+        raise ValueError(
+            f"Unknown loss_type: '{loss_type}'. "
+            "Choose 'ce', 'focal', 'ce_dice', or 'ce_boundary'."
+        )
+
+
+def build_scheduler(
+    cfg: dict,
+    optimizer: torch.optim.Optimizer,
+    total_iters: int,
+) -> torch.optim.lr_scheduler.LRScheduler:
+    """scheduler_type에 따라 LR scheduler를 생성."""
+    scheduler_type = cfg.get("scheduler_type", "poly")
+
+    if scheduler_type == "poly":
+        def poly_lr(iteration):
+            return (1 - iteration / total_iters) ** 0.9
+        return torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=poly_lr)
+
+    elif scheduler_type == "warmup_poly":
+        warmup_iters = int(total_iters * cfg["warmup_ratio"])
+
+        def warmup_poly_lr(iteration):
+            if iteration < warmup_iters:
+                return (iteration + 1) / warmup_iters
+            progress = (iteration - warmup_iters) / max(total_iters - warmup_iters, 1)
+            return (1 - progress) ** 0.9
+
+        return torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=warmup_poly_lr)
+
+    else:
+        raise ValueError(
+            f"Unknown scheduler_type: '{scheduler_type}'. "
+            "Choose 'poly' or 'warmup_poly'."
+        )
 
 
 # =============================================================================
@@ -127,10 +291,6 @@ class MeanIoU:
             per_class   : list   — per-class IoU (NaN if class absent)
         """
         conf = self.confusion.float()
-        # IoU_c = TP_c / (TP_c + FP_c + FN_c)
-        # TP_c = conf[c, c]
-        # FP_c = sum(conf[:, c]) - conf[c, c]
-        # FN_c = sum(conf[c, :]) - conf[c, c]
         intersection = conf.diag()                     # (C,)
         union = conf.sum(1) + conf.sum(0) - intersection  # (C,)
 
@@ -150,27 +310,30 @@ class MeanIoU:
 def train_one_epoch(
     model,
     loader: DataLoader,
-    criterion: CrossEntropyLoss,
+    criterion: nn.Module,
     optimizer: torch.optim.Optimizer,
+    scheduler,
+    scheduler_type: str,
     device: torch.device,
     epoch: int,
 ) -> float:
     """
     Returns:
         avg_loss : float
+
+    Scheduler stepping:
+        - "poly"        : epoch 기반 → main 루프에서 epoch 종료 후 step()
+        - "warmup_poly" : iteration 기반 → 여기서 매 batch 후 step()
     """
     model.train()
     total_loss = 0.0
     n_batches  = len(loader)
 
     for batch_idx, (images, masks) in enumerate(loader):
-        # images : (B, 3, H, W)  float32
-        # masks  : (B, H, W)     int64
         images = images.to(device)
         masks  = masks.to(device)
 
         # ── Forward ──────────────────────────────────────────────────────────
-        # logits: (B, num_classes, H, W)
         logits = model(images)
 
         # ── Loss ─────────────────────────────────────────────────────────────
@@ -180,6 +343,10 @@ def train_one_epoch(
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
+
+        # warmup_poly: iteration 단위로 step (validation과 무관하게 batch마다)
+        if scheduler_type == "warmup_poly":
+            scheduler.step()
 
         total_loss += loss.item()
 
@@ -202,7 +369,7 @@ def train_one_epoch(
 def validate(
     model,
     loader: DataLoader,
-    criterion: CrossEntropyLoss,
+    criterion: nn.Module,
     device: torch.device,
     num_classes: int,
     ignore_index: int,
@@ -217,20 +384,14 @@ def validate(
     miou_calc  = MeanIoU(num_classes=num_classes, ignore_index=ignore_index)
 
     for images, masks in loader:
-        # images : (B, 3, H, W)
-        # masks  : (B, H, W)
         images = images.to(device)
         masks  = masks.to(device)
 
-        # logits : (B, num_classes, H, W)
         logits = model(images)
 
-        # loss
         loss = criterion(logits, masks)
         total_loss += loss.item()
 
-        # mIoU update
-        # preds : (B, H, W)  class index
         preds = logits.argmax(dim=1)
         miou_calc.update(preds.cpu(), masks.cpu())
 
@@ -278,23 +439,39 @@ def save_checkpoint(
 # =============================================================================
 
 def main():
+    # ── argparse ─────────────────────────────────────────────────────────────
+    parser = argparse.ArgumentParser(description="SegFormer-B0 Training")
+    parser.add_argument(
+        "--config", type=str, required=True,
+        help="Path to yaml config file (e.g. configs/e0_internal.yaml)"
+    )
+    args = parser.parse_args()
+
+    # ── Config 로드 ───────────────────────────────────────────────────────────
+    cfg = load_config(args.config)
+    print(f"Config: {args.config}")
+    print(f"  exp_name={cfg['exp_name']}  model={cfg['model_type']}  "
+          f"loss={cfg['loss_type']}  scheduler={cfg['scheduler_type']}")
+
     # ── Device ───────────────────────────────────────────────────────────────
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Device: {device}")
 
     # ── Transform ─────────────────────────────────────────────────────────────
-    transform = SegTransform(size=CFG["input_size"])
+    aug_type = cfg.get("augmentation_type", "basic")
+    train_transform = build_transform(aug_type, cfg["input_size"], split="train")
+    val_transform   = build_transform(aug_type, cfg["input_size"], split="val")
 
     # ── Dataset ───────────────────────────────────────────────────────────────
     train_dataset = CamVidDataset(
-        image_dir=CFG["train_img_dir"],
-        label_dir=CFG["train_lbl_dir"],
-        transforms=transform,
+        image_dir=cfg["train_img_dir"],
+        label_dir=cfg["train_lbl_dir"],
+        transforms=train_transform,
     )
     val_dataset = CamVidDataset(
-        image_dir=CFG["val_img_dir"],
-        label_dir=CFG["val_lbl_dir"],
-        transforms=transform,
+        image_dir=cfg["val_img_dir"],
+        label_dir=cfg["val_lbl_dir"],
+        transforms=val_transform,
     )
 
     print(f"Train: {len(train_dataset)} samples")
@@ -303,75 +480,73 @@ def main():
     # ── DataLoader ────────────────────────────────────────────────────────────
     train_loader = DataLoader(
         train_dataset,
-        batch_size=CFG["batch_size"],
+        batch_size=cfg["batch_size"],
         shuffle=True,
-        num_workers=CFG["num_workers"],
+        num_workers=cfg["num_workers"],
         pin_memory=True,
-        drop_last=True,    # batch가 incomplete하면 BN이 불안정해질 수 있음
+        drop_last=True,
     )
     val_loader = DataLoader(
         val_dataset,
-        batch_size=CFG["batch_size"],
+        batch_size=cfg["batch_size"],
         shuffle=False,
-        num_workers=CFG["num_workers"],
+        num_workers=cfg["num_workers"],
         pin_memory=True,
     )
 
     # ── Model ─────────────────────────────────────────────────────────────────
-    model = build_segformer_b0(
-        num_classes=CFG["num_classes"],
-        embed_dim=CFG["embed_dim"],
-        dropout=CFG["dropout"],
-    ).to(device)
-
+    model = build_model(cfg).to(device)
     total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"Model params: {total_params:,}")
 
     # ── Loss ──────────────────────────────────────────────────────────────────
-    criterion = CrossEntropyLoss(ignore_index=CFG["ignore_index"])
+    criterion = build_criterion(cfg)
 
     # ── Optimizer ─────────────────────────────────────────────────────────────
-    # SegFormer 논문: AdamW, lr=6e-5, weight_decay=0.01
-    # encoder / decoder lr 분리 (encoder는 더 낮은 lr — pretrain 보호)
     encoder_params = list(model.encoder.parameters())
     decoder_params = list(model.decoder.parameters())
 
     optimizer = torch.optim.AdamW(
         [
-            {"params": encoder_params, "lr": CFG["lr"]},
-            {"params": decoder_params, "lr": CFG["lr"] * 10},  # decoder는 10배
+            {"params": encoder_params, "lr": cfg["lr"]},
+            {"params": decoder_params, "lr": cfg["lr"] * 10},
         ],
-        weight_decay=CFG["weight_decay"],
+        weight_decay=cfg["weight_decay"],
     )
 
-    # ── LR Scheduler: poly decay (SegFormer 논문 권장) ───────────────────────
-    total_iters = CFG["epochs"] * len(train_loader)
+    # ── Scheduler ─────────────────────────────────────────────────────────────
+    total_iters    = cfg["epochs"] * len(train_loader)
+    scheduler_type = cfg.get("scheduler_type", "poly")
+    scheduler      = build_scheduler(cfg, optimizer, total_iters)
 
-    def poly_lr(iteration):
-        return (1 - iteration / total_iters) ** 0.9
-
-    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=poly_lr)
+    # stepping 기준 안내
+    # - poly        : epoch 단위 (main 루프에서 1회/epoch) — E0~E4 baseline과 동일
+    # - warmup_poly : iteration 단위 (train_one_epoch 내 batch마다) — E5 전용
 
     # ── 학습 루프 ─────────────────────────────────────────────────────────────
     best_miou = 0.0
 
     print("\n" + "=" * 60)
-    print(f"Training: {CFG['exp_name']}  |  {CFG['epochs']} epochs")
+    print(f"Training: {cfg['exp_name']}  |  {cfg['epochs']} epochs")
     print("=" * 60)
 
-    for epoch in range(1, CFG["epochs"] + 1):
+    for epoch in range(1, cfg["epochs"] + 1):
         t0 = time.time()
 
         # Train
         train_loss = train_one_epoch(
-            model, train_loader, criterion, optimizer, device, epoch
+            model, train_loader, criterion, optimizer,
+            scheduler, scheduler_type, device, epoch,
         )
-        scheduler.step()
+
+        # poly: epoch 단위 step (validation 전에 수행, validation과 섞이지 않음)
+        if scheduler_type != "warmup_poly":
+            scheduler.step()
 
         # Validate
         val_loss, miou, per_class_iou = validate(
             model, val_loader, criterion, device,
-            CFG["num_classes"], CFG["ignore_index"],
+            cfg["num_classes"], cfg["ignore_index"],
         )
 
         elapsed = time.time() - t0
@@ -379,7 +554,7 @@ def main():
         # 출력
         current_lr = optimizer.param_groups[0]["lr"]
         print(
-            f"\nEpoch [{epoch:3d}/{CFG['epochs']}] "
+            f"\nEpoch [{epoch:3d}/{cfg['epochs']}] "
             f"| train_loss: {train_loss:.4f} "
             f"| val_loss: {val_loss:.4f} "
             f"| mIoU: {miou:.4f} "
@@ -401,7 +576,7 @@ def main():
 
         save_checkpoint(
             model, optimizer, epoch, miou,
-            CFG["save_dir"], CFG["exp_name"],
+            cfg["save_dir"], cfg["exp_name"],
             is_best=is_best,
         )
 

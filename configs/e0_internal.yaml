@@ -1,0 +1,41 @@
+# configs/e0_internal.yaml
+#
+# E0 Internal Baseline
+# ─────────────────────
+# 단일 변수 실험의 기준이 되는 내부 baseline.
+# pretrained 없음, augmentation 최소, 단순 poly scheduler.
+# 이 설정을 기준으로 E1~E5를 비교한다.
+
+exp_name: e0_mlp_ce_internal
+
+# ── Model ─────────────────────────────────────────────────────────────────────
+model_type:  mlp        # mlp | fpn
+num_classes: 11
+embed_dim:   256        # MLP decoder unified channel dim
+dropout:     0.1
+pretrained:  false      # pretrained encoder 사용 여부
+
+# ── Loss ──────────────────────────────────────────────────────────────────────
+loss_type: ce           # ce | focal | ce_dice | ce_boundary
+
+# ── Data ──────────────────────────────────────────────────────────────────────
+input_size:        [360, 480]   # (H, W)
+augmentation_type: basic        # basic | paperlike
+num_workers:       2
+
+train_img_dir: datasets/CamVid/train
+train_lbl_dir: datasets/CamVid/train_labels
+val_img_dir:   datasets/CamVid/val
+val_lbl_dir:   datasets/CamVid/val_labels
+
+# ── Training ──────────────────────────────────────────────────────────────────
+batch_size:   4
+epochs:       40
+lr:           6.0e-5    # SegFormer 논문 권장값
+weight_decay: 0.01
+
+# ── Scheduler ─────────────────────────────────────────────────────────────────
+scheduler_type: poly    # poly | warmup_poly
+
+# ── Output ────────────────────────────────────────────────────────────────────
+save_dir: weights

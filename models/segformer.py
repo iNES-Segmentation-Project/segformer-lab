@@ -31,6 +31,7 @@ from typing import List, Type
 from .encoder.mit_encoder import MiTEncoder
 from .decoder.base_decoder import BaseDecoder
 from .decoder.mlp_decoder import MLPDecoder
+from .decoder.fpn_decoder import FPNDecoder
 
 
 # ── SegFormer-B0 encoder output channels (fixed, must not change) ─────────────
@@ -137,6 +138,41 @@ def build_segformer_b0(
     decoder = MLPDecoder(
         in_channels=MIT_B0_CHANNELS,
         embed_dim=embed_dim,
+        num_classes=num_classes,
+        dropout=dropout,
+    )
+    return SegFormer(
+        num_classes=num_classes,
+        decoder=decoder,
+        attn_drop=attn_drop,
+        proj_drop=proj_drop,
+    )
+
+
+def build_segformer_b0_fpn(
+    num_classes: int,
+    fpn_dim: int = 256,
+    dropout: float = 0.1,
+    attn_drop: float = 0.0,
+    proj_drop: float = 0.0,
+) -> SegFormer:
+    """
+    Build the E1 experiment: SegFormer-B0 + FPN Decoder.
+
+    Encoder는 E0과 완전히 동일. Decoder만 FPNDecoder로 교체.
+    단일 변수 원칙: Decoder 구조만 변경, 나머지 모든 설정 동일하게 유지.
+
+    Args:
+        num_classes (int):   Number of target classes. CamVid=11, Cityscapes=19
+        fpn_dim     (int):   FPN internal channel dim. Default: 256.
+        dropout     (float): Decoder dropout before seg head.
+
+    Returns:
+        SegFormer model ready for training.
+    """
+    decoder = FPNDecoder(
+        in_channels=MIT_B0_CHANNELS,
+        fpn_dim=fpn_dim,
         num_classes=num_classes,
         dropout=dropout,
     )
