@@ -508,7 +508,7 @@ def main():
 
     optimizer = torch.optim.AdamW(
         [
-            {"params": encoder_params, "lr": cfg["lr"]},
+            {"params": encoder_params, "lr": cfg["lr"] * 10},
             {"params": decoder_params, "lr": cfg["lr"] * 10},
         ],
         weight_decay=cfg["weight_decay"],
