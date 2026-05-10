@@ -61,6 +61,7 @@ python scripts/evaluate.py --config configs/b0_mlp_ce.yaml
 | E4 | MiT-B0 | MLP | CE+Boundary | loss 변경 |
 | E5 | MiT-B0 | FPN | CE+Dice+Boundary | 복합 (pretrained + aug + diff-LR) |
 
+
 E0~E4는 단일 변수 비교 실험이며, E5는 E0~E4 결과에 근거한 확장 실험이다.
 
 ---
@@ -108,7 +109,8 @@ FPN이 MLP 대비 val +0.0257, test +0.0147 향상.
 **E5 복합 실험**
 
 test mIoU 0.7572로 E1(0.5829) 대비 +0.1743 향상.
-pretrained encoder 도입으로 epoch 10 시점에서 이미 val mIoU 0.7135를 기록 — E0~E4 최종값을 초과.
+pretrained encoder 도입으로 epoch 10 시점에서 이미 val mIoU 0.7135를 기록.
+E0~E4 최종값을 초과.
 소수 클래스(Pole, SignSymbol, Pedestrian)의 대폭 개선과 val-test 하락폭 0.0471(E0~E4 평균 0.077 대비 감소)은
 pretrained encoder와 augmentation 강화의 복합 효과로 해석된다.
 
