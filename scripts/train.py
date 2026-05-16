@@ -449,17 +449,62 @@ def main():
     total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"Model params: {total_params:,}")
 
-    # ── GFLOPs (fvcore) ───────────────────────────────────────────────────────
+    # ── GFLOPs / Latency / FPS ────────────────────────────────────────────────
     try:
         from fvcore.nn import FlopCountAnalysis
+
+        model.eval()
+
         _dummy = torch.randn(1, 3, *cfg["input_size"]).to(device)
-        flops  = FlopCountAnalysis(model, _dummy)
-        flops.unsupported_ops_settings(raise_if_not_supported=False)
+
+        # GFLOPs
+        flops = FlopCountAnalysis(model, _dummy)
         gflops = flops.total() / 1e9
+
         print(f"Model GFLOPs: {gflops:.2f} G  (input {cfg['input_size']})")
+
+        # ── Latency / FPS 측정 ────────────────────────────────────────────────
+        starter = torch.cuda.Event(enable_timing=True)
+        ender   = torch.cuda.Event(enable_timing=True)
+
+        repetitions = 100
+        timings = []
+
+        # warmup
+        with torch.no_grad():
+            for _ in range(10):
+                _ = model(_dummy)
+
+        torch.cuda.synchronize()
+
+        # 측정
+        with torch.no_grad():
+            for _ in range(repetitions):
+
+                starter.record()
+
+                _ = model(_dummy)
+
+                ender.record()
+
+                torch.cuda.synchronize()
+
+                curr_time = starter.elapsed_time(ender)  # ms
+                timings.append(curr_time)
+
+        avg_latency = sum(timings) / len(timings)   # ms
+        fps = 1000.0 / avg_latency
+
+        print(f"Model Latency: {avg_latency:.2f} ms")
+        print(f"Model FPS    : {fps:.2f}")
+
         del _dummy
+
     except Exception as e:
-        print(f"Model GFLOPs: 측정 실패 ({e})")
+        print(f"Model complexity 측정 실패 ({e})")
+
+
+
 
     # ── Loss ──────────────────────────────────────────────────────────────────
     criterion = build_criterion(cfg)
