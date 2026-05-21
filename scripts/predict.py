@@ -15,14 +15,25 @@ Colab / local usage:
         --limit 10 \
         --output-dir outputs/predictions/test_10
 
-    # 3) Predict one specific image. --image must point to an existing file.
+    # 3) Use a prediction YAML. CLI args override YAML values when both are set.
+    python scripts/predict.py --predict-config configs/predict_e0_paperlike_100.yaml
+
+    # 4) Predict the N-th image from test_img_dir or val_img_dir after filename sorting.
+    #    --index is 1-based, so --index 1 means the first image.
+    python scripts/predict.py \
+        --config configs/e0_paperlike.yaml \
+        --checkpoint weights/e0_mlp_ce_paperlike_100_best.pth \
+        --index 15 \
+        --device cuda
+
+    # 5) Predict one specific image. --image must point to an existing file.
     python scripts/predict.py \
         --config configs/e0_paperlike.yaml \
         --checkpoint weights/e0_mlp_ce_paperlike_100_best.pth \
         --image datasets/CamVid/test/0001TP_006690.png \
         --device cuda
 
-    # 4) Predict images from a specific directory.
+    # 6) Predict images from a specific directory.
     python scripts/predict.py \
         --config configs/e0_paperlike.yaml \
         --checkpoint weights/e0_mlp_ce_paperlike_100_best.pth \
@@ -37,9 +48,13 @@ Outputs:
     class_legend.txt: class id/name/color mapping used by *_pred.png
 
 Notes:
+    - --predict-config can provide run_name/config/checkpoint/image_dir/index/limit/output_dir/device.
+    - If run_name is set and checkpoint is omitted, checkpoint defaults to weights/<run_name>_<checkpoint_type>.pth.
+    - If run_name is set and output_dir is omitted, output_dir defaults to outputs/predictions/<run_name>.
     - If --image is set, only that single image is predicted.
     - If --image-dir is set, images are read from that directory.
     - If neither is set, the script uses cfg["test_img_dir"] first, then cfg["val_img_dir"].
+    - --index N selects only the N-th image from the sorted directory list. It is 1-based.
     - --limit 0 or omitting --limit processes all images in directory mode.
     - Prediction loads the checkpoint directly, so cfg["pretrained"] is disabled by default
       to avoid HuggingFace downloads. Add --use-config-pretrained only when you really
@@ -67,6 +82,7 @@ from pathlib import Path
 import numpy as np
 import torch
 import torch.nn.functional as F
+import yaml
 from PIL import Image
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -116,6 +132,22 @@ def save_legend(output_dir: Path) -> None:
     (output_dir / "class_legend.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def load_predict_config(path: str | None) -> dict:
+    if not path:
+        return {}
+    config_path = resolve_path(path)
+    with config_path.open("r", encoding="utf-8") as f:
+        data = yaml.safe_load(f) or {}
+    if not isinstance(data, dict):
+        raise ValueError("--predict-config must point to a YAML mapping.")
+    return data
+
+
+def choose(args: argparse.Namespace, predict_cfg: dict, key: str, default=None):
+    value = getattr(args, key)
+    return value if value is not None else predict_cfg.get(key, default)
+
+
 def resolve_path(path: str | Path) -> Path:
     path = Path(path)
     if not path.is_absolute():
@@ -128,8 +160,21 @@ def default_checkpoint(cfg: dict, checkpoint_type: str) -> Path:
     return resolve_path(cfg["save_dir"]) / f"{cfg['exp_name']}_{suffix}.pth"
 
 
-def collect_images(image: str | None, image_dir: str | None, cfg: dict, limit: int) -> list[Path]:
+def checkpoint_from_run_name(run_name: str, checkpoint_type: str) -> Path:
+    suffix = "best" if checkpoint_type == "best" else "last"
+    return ROOT / "weights" / f"{run_name}_{suffix}.pth"
+
+
+def collect_images(
+    image: str | None,
+    image_dir: str | None,
+    cfg: dict,
+    limit: int,
+    index: int | None,
+) -> list[Path]:
     if image:
+        if index is not None:
+            raise ValueError("--index cannot be used with --image.")
         paths = [resolve_path(image)]
     else:
         directory_value = image_dir or cfg.get("test_img_dir") or cfg.get("val_img_dir")
@@ -138,6 +183,13 @@ def collect_images(image: str | None, image_dir: str | None, cfg: dict, limit: i
         directory = resolve_path(directory_value)
         exts = {".png", ".jpg", ".jpeg", ".bmp"}
         paths = sorted(p for p in directory.iterdir() if p.suffix.lower() in exts)
+
+    if index is not None:
+        if index < 1:
+            raise ValueError("--index is 1-based, so it must be >= 1.")
+        if index > len(paths):
+            raise IndexError(f"--index {index} is out of range. Directory has {len(paths)} images.")
+        return [paths[index - 1]]
 
     if limit > 0:
         paths = paths[:limit]
@@ -235,16 +287,22 @@ def predict_one(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Predict segmentation masks with a trained SegFormer checkpoint.")
-    parser.add_argument("--config", required=True, help="Path to config yaml.")
+    parser.add_argument("--predict-config", help="YAML file with prediction arguments.")
+    parser.add_argument("--config", help="Path to model config yaml.")
     parser.add_argument("--checkpoint", help="Checkpoint path. Defaults to weights/<exp_name>_best.pth.")
-    parser.add_argument("--checkpoint-type", choices=("best", "last"), default="best")
+    parser.add_argument("--checkpoint-type", choices=("best", "last"))
     parser.add_argument("--image", help="Single input image path.")
     parser.add_argument("--image-dir", help="Input image directory. Defaults to cfg['test_img_dir'].")
+    parser.add_argument(
+        "--index",
+        type=int,
+        help="Predict only the N-th image from the sorted image directory. 1-based.",
+    )
     parser.add_argument("--label-dir", help="Optional label directory for compare panels.")
     parser.add_argument("--output-dir", help="Output directory. Defaults to outputs/predictions/<exp_name>.")
-    parser.add_argument("--limit", type=int, default=0, help="Max number of images for directory mode. 0 means all.")
-    parser.add_argument("--device", choices=("cpu", "cuda"), default="cuda" if torch.cuda.is_available() else "cpu")
-    parser.add_argument("--alpha", type=float, default=0.45, help="Overlay mask opacity.")
+    parser.add_argument("--limit", type=int, help="Max number of images for directory mode. 0 means all.")
+    parser.add_argument("--device", choices=("cpu", "cuda"))
+    parser.add_argument("--alpha", type=float, help="Overlay mask opacity.")
     parser.add_argument(
         "--use-config-pretrained",
         action="store_true",
@@ -252,16 +310,47 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    cfg = load_config(args.config)
-    if not args.use_config_pretrained:
-        cfg["pretrained"] = False
-    device = torch.device(args.device)
+    predict_cfg = load_predict_config(args.predict_config)
 
-    checkpoint = resolve_path(args.checkpoint) if args.checkpoint else default_checkpoint(cfg, args.checkpoint_type)
+    run_name = predict_cfg.get("run_name")
+    config_path = choose(args, predict_cfg, "config")
+    if not config_path:
+        raise ValueError("Pass --config or set 'config' in --predict-config.")
+
+    checkpoint_arg = choose(args, predict_cfg, "checkpoint")
+    checkpoint_type = choose(args, predict_cfg, "checkpoint_type", "best")
+    image = choose(args, predict_cfg, "image")
+    image_dir = choose(args, predict_cfg, "image_dir")
+    index = choose(args, predict_cfg, "index")
+    label_dir = choose(args, predict_cfg, "label_dir")
+    output_dir_arg = choose(args, predict_cfg, "output_dir")
+    limit = choose(args, predict_cfg, "limit", 0)
+    device_arg = choose(args, predict_cfg, "device", "cuda" if torch.cuda.is_available() else "cpu")
+    alpha = choose(args, predict_cfg, "alpha", 0.45)
+    use_config_pretrained = args.use_config_pretrained or bool(
+        predict_cfg.get("use_config_pretrained", False)
+    )
+
+    cfg = load_config(config_path)
+    if not use_config_pretrained:
+        cfg["pretrained"] = False
+    device = torch.device(device_arg)
+
+    if checkpoint_arg:
+        checkpoint = resolve_path(checkpoint_arg)
+    elif run_name:
+        checkpoint = checkpoint_from_run_name(run_name, checkpoint_type)
+    else:
+        checkpoint = default_checkpoint(cfg, checkpoint_type)
     if not checkpoint.exists():
         raise FileNotFoundError(f"Checkpoint not found: {checkpoint}")
 
-    output_dir = resolve_path(args.output_dir) if args.output_dir else ROOT / "outputs" / "predictions" / cfg["exp_name"]
+    if output_dir_arg:
+        output_dir = resolve_path(output_dir_arg)
+    elif run_name:
+        output_dir = ROOT / "outputs" / "predictions" / run_name
+    else:
+        output_dir = ROOT / "outputs" / "predictions" / cfg["exp_name"]
     output_dir.mkdir(parents=True, exist_ok=True)
     save_legend(output_dir)
 
@@ -270,9 +359,9 @@ def main() -> None:
     model.load_state_dict(state["model"] if "model" in state else state)
     model.eval()
 
-    image_paths = collect_images(args.image, args.image_dir, cfg, args.limit)
+    image_paths = collect_images(image, image_dir, cfg, int(limit), index)
     for image_path in image_paths:
-        predict_one(model, image_path, cfg, device, output_dir, args.alpha, args.label_dir)
+        predict_one(model, image_path, cfg, device, output_dir, float(alpha), label_dir)
 
     print(f"Checkpoint: {checkpoint}")
     print(f"Images    : {len(image_paths)}")
