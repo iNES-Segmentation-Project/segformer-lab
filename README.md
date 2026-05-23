@@ -34,8 +34,9 @@ flowchart TB
 
 ## 1. Overview
 
-본 프로젝트는 SegFormer-B0를 기반으로,
-lightweight encoder 환경에서 decoder 구조 변경이 segmentation 성능에 미치는 영향을 분석한 연구입니다.
+본 프로젝트는 SegFormer-B0를 기반으로,  
+lightweight encoder 환경에서  
+decoder 구조 변경이 segmentation 성능에 미치는 영향을 분석한 연구입니다.
 
 저희 연구는 SegFormer 논문의 model size ablation에서 출발했습니다.
 
