@@ -7,7 +7,7 @@
 ## 1. Overview
 
 이 프로젝트는 단순히 SegFormer-B0를 학습한 구현 프로젝트가 아니라,
-**“왜 성능이 좋아졌는가?”**를 실험적으로 해석하기 위해 설계한 semantic segmentation 연구 프로젝트입니다.
+**왜 성능이 좋아졌는가?** 를 실험적으로 해석하기 위해 설계한 semantic segmentation 연구 프로젝트입니다.
 
 핵심 가설은 다음과 같습니다.
 
@@ -15,13 +15,8 @@
 > MiT-B0 같은 lightweight encoder에서는 feature representation이 제한될 수 있다.
 > 따라서 decoder 단계의 **multi-scale feature fusion**이 small/thin object segmentation과 generalization에 더 큰 영향을 줄 수 있다.
 
-본 프로젝트에서는 이 가설을 검증하기 위해:
-
-- Stage 1: controlled experiment
-- Stage 2: combined improvement experiment
-- Stage 2+: decoder effect isolation
-
-순서로 실험을 설계했습니다.
+본 프로젝트에서는 이 가설을 검증하기 위해
+**Stage 1 → Stage 2 → Stage 2+** 의 단계적 실험을 설계했습니다.
 
 ---
 
@@ -48,30 +43,47 @@ SegFormer는 transformer 기반 semantic segmentation 모델로,
 
 ## 3. Experimental Flow
 
-```text
-Research Hypothesis
-    ↓
-Stage 1: Controlled Experiment
-- E0 baseline
-- decoder / loss 단일 변수 비교
-    ↓
-FPN decoder improvement 발견
-    ↓
-Stage 2: E5 Combined Experiment
-- FPN + pretrained + augmentation + combined loss
-    ↓
-큰 성능 향상 확인
-    ↓
-하지만 원인 분리 한계 발견
-"FPN 때문인가? pretrained 때문인가?"
-    ↓
-Stage 2+: Decoder Effect Isolation
-- pretrained, loss, scheduler 고정
-- MLP vs FPN decoder만 비교
-    ↓
-Final Insight
-- FPN decoder 효과가 독립적으로도 유지됨
-- small/thin object에서 개선 집중
+```mermaid
+flowchart TD
+    A["🔬 Research Hypothesis\nLightweight encoder에서\ndecoder의 feature fusion이\n성능에 더 큰 영향을 주는가?"]
+
+    subgraph S1["Stage 1 — Controlled Experiment"]
+        B["E0 Baseline\nMLP + CE + scratch"]
+        C["E1–E4 단일 변수 비교\ndecoder / loss only"]
+    end
+
+    D["✅ FPN decoder 개선 확인\ntest mIoU +0.0147\nsmall/thin object 향상 집중"]
+
+    subgraph S2["Stage 2 — Combined Experiment"]
+        E["E5\nFPN + pretrained + aug + combined loss"]
+    end
+
+    F["✅ 큰 성능 향상 확인\ntest mIoU +0.1890"]
+
+    G["⚠️ 해석 한계 발견\nFPN 때문인가?\npretrained 때문인가?"]
+
+    subgraph S2P["Stage 2+ — Decoder Effect Isolation"]
+        H["pretrained / loss / aug 고정\nMLP vs FPN decoder만 비교"]
+    end
+
+    I["✅ Final Insight\nFPN 효과 독립적으로 유지\ntest mIoU +0.0176\nsmall/thin object 패턴 재현"]
+
+    A --> S1
+    S1 --> D
+    D --> S2
+    S2 --> F
+    F --> G
+    G --> S2P
+    S2P --> I
+
+    style A fill:#4A4A8A,color:#fff,stroke:#6666bb
+    style D fill:#2D6A4F,color:#fff,stroke:#40916c
+    style F fill:#2D6A4F,color:#fff,stroke:#40916c
+    style G fill:#7D3C1A,color:#fff,stroke:#b35a2a
+    style I fill:#1A5276,color:#fff,stroke:#2874a6
+    style S1 fill:#1a1a2e,color:#aaa,stroke:#555
+    style S2 fill:#1a1a2e,color:#aaa,stroke:#555
+    style S2P fill:#1a1a2e,color:#aaa,stroke:#555
 ```
 
 이 흐름의 핵심은 단순히 결과를 나열하는 것이 아니라,
@@ -175,7 +187,7 @@ E5는 test mIoU **0.7572**를 기록하며 E0 대비 **+0.1890** 향상되었습
 ### Stage 2+ — Decoder Effect Isolation
 
 E5의 가장 큰 한계는
-**“FPN 때문에 좋아진 것인지, pretrained 때문에 좋아진 것인지 분리하기 어렵다”**는 점이었습니다.
+**FPN 때문에 좋아진 것인지, pretrained 때문에 좋아진 것인지 분리하기 어렵다** 는 점이었습니다.
 
 이를 보완하기 위해 Stage 2+에서는 다음 조건을 고정했습니다.
 
