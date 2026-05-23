@@ -72,7 +72,7 @@ Reference :
 - Stage 1 실험 구현 및 분석
 - FPN / MLP decoder 구현
 - YAML 기반 experiment config 관리 구조 구현
-- GitHub repository organization 관리
+- GitHub repository organization 및 Notion 관리
 
 </details>
 
