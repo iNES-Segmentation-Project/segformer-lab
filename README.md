@@ -1,6 +1,6 @@
 ﻿# SegFormer-B0 Semantic Segmentation Research Project
 
-**Decoder 구조 변경은 lightweight encoder의 한계를 완화할 수 있는가?**
+## **Decoder 구조 변경은 lightweight encoder의 한계를 완화할 수 있는가?**
 >
 > 본 프로젝트는 SegFormer-B0에서 decoder 구조(FPN)의 실제 기여를  
 > **controlled experiment**와 **decoder isolation** 기반으로 분석한 연구 프로젝트입니다.
@@ -35,8 +35,8 @@ flowchart TB
 ## 1. Overview
 
 본 프로젝트는 SegFormer-B0를 기반으로,  
-lightweight encoder 환경에서  
-decoder 구조 변경이 segmentation 성능에 미치는 영향을 분석한 연구입니다.
+lightweight encoder 환경에서 decoder 구조 변경이 
+segmentation 성능에 미치는 영향을 분석한 연구입니다.
 
 저희 연구는 SegFormer 논문의 model size ablation에서 출발했습니다.
 
