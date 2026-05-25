@@ -267,7 +267,8 @@ Stage 1에서는 **decoder 또는 loss 중 하나만 변경하는 통제 실험*
 ![Figure 2](assets/fig2_stage1_per_class_heatmap.png)
 
 > E0–E4 단일 변수 실험의 class별 성능 변화입니다.  
-> E1(FPN)은 class 전반에 걸쳐 비교적 일관된 향상을 보인 반면, loss 기반 실험(E2–E4)은 class별 변화가 불안정하게 나타났습니다.
+> E1(FPN)은 class 전반에서 비교적 일관된 향상을 보였지만,  
+> loss 기반 실험(E2–E4)은 class별 변화 양상이 불안정하게 나타났습니다.
 
 ## 결과
 
