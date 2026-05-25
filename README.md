@@ -23,7 +23,12 @@ SegFormer는 동일한 lightweight All-MLP decoder를 사용하면서도,
 <p align="center">
   <img src="assets/reference.png" width="700"/>
   <br/>
-  <sub>MiT encoder scale에 따라 segmentation 성능 차이가 발생했습니다. — <a href="https://arxiv.org/abs/2105.15203">SegFormer: Simple and Efficient Design for Semantic Segmentation with Transformers</a></sub>
+<sub>
+  <b>MiT encoder scale에 따라 segmentation 성능 차이가 발생했습니다.</b><br/>
+  <a href="https://arxiv.org/abs/2105.15203">
+    SegFormer: Simple and Efficient Design for Semantic Segmentation with Transformers
+  </a>
+</sub>
 </p>
 
 이 결과를 바탕으로 다음과 같은 연구 가설을 설정했습니다.
