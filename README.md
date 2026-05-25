@@ -3,7 +3,7 @@
 **Decoder 구조 변경은 경량 encoder의 한계를 완화할 수 있는가?**
 
 > 본 프로젝트는 SegFormer-B0에서 **decoder 구조(FPN)의 실제 기여**를  
-> **통제 실험(controlled experiment)**과 **decoder 효과 분리 실험(decoder isolation)** 기반으로 분석한 연구 프로젝트입니다.
+> **통제 실험(controlled experiment)** 과 **decoder 효과 분리 실험(decoder isolation)** 기반으로 분석한 연구 프로젝트입니다.
 
 ---
 
