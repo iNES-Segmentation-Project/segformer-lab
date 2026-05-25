@@ -22,20 +22,14 @@ SegFormer는 동일한 lightweight All-MLP decoder를 사용하면서도,
 
 <p align="center">
   <img src="assets/reference.png" width="700"/>
+  <br/>
+  <sub>MiT encoder scale에 따라 segmentation 성능 차이가 발생했습니다. — <a href="https://arxiv.org/abs/2105.15203">SegFormer: Simple and Efficient Design for Semantic Segmentation with Transformers</a></sub>
 </p>
-
-> **SegFormer 논문 참고 결과**  
-> MiT encoder scale에 따라 segmentation 성능 차이가 발생했습니다.
 
 이 결과를 바탕으로 다음과 같은 연구 가설을 설정했습니다.
 
 > **encoder capacity가 제한된 SegFormer-B0에서는  
 > decoder 단계의 multi-scale feature fusion이 더 중요한 역할을 할 수 있다.**
-
-참고 논문
-
-> **SegFormer : Simple and Efficient Design for Semantic Segmentation with Transformers**  
-> https://arxiv.org/abs/2105.15203
 
 본 프로젝트에서는 단순 성능 향상보다,  
 **"왜 성능이 좋아졌는가?"를 검증하기 위한 통제 실험과 decoder 효과 분리 분석**에 집중했습니다.
