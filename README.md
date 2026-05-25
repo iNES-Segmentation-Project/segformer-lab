@@ -3,7 +3,7 @@
 **Decoder 구조 변경은 경량 encoder의 한계를 완화할 수 있는가?**
 
 > 본 프로젝트는 SegFormer-B0에서 **decoder 구조(FPN)의 실제 기여**를  
-> **통제 실험(controlled experiment)** 과 **decoder 효과 분리 실험(decoder isolation)** 기반으로 분석한 연구 프로젝트입니다.
+> **통제 실험(controlled experiment)** , **decoder 효과 분리 실험(decoder isolation)** 기반으로 분석한 연구 프로젝트입니다.
 
 ---
 
@@ -66,10 +66,10 @@ SegFormer는 동일한 **lightweight All-MLP decoder**를 사용하면서도,
 > **encoder capacity가 제한된 SegFormer-B0에서는  
 > decoder 단계의 multi-scale feature fusion이 더 중요한 역할을 할 수 있다.**
 
-참고 논문(Reference) :
+참고 논문(Reference) 
 
-- **SegFormer : Simple and Efficient Design for Semantic Segmentation with Transformers**
-- https://arxiv.org/abs/2105.15203
+> **SegFormer : Simple and Efficient Design for Semantic Segmentation with Transformers**
+> https://arxiv.org/abs/2105.15203
 
 본 프로젝트에서는 단순 성능 향상보다,  
 **“왜 성능이 좋아졌는가?”를 검증하기 위한 통제 실험과 decoder 효과 분리 분석**에 집중했습니다.
@@ -239,7 +239,7 @@ Stage 1에서는 **decoder 또는 loss 중 하나만 변경하는 통제 실험*
 
 ---
 
-## 그림(Figure)
+## 결과 시각화(Result Visualization)
 
 ![Figure 2](assets/fig2_stage1_per_class_heatmap.png)
 
