@@ -345,23 +345,12 @@ E5는 **+0.1890 mIoU**를 보였지만,
 여러 요소가 동시에 변경된 combined experiment였기 때문에  
 **FPN 단독 효과로 해석하지 않았습니다.**
 
-E5에서는
+E5에서는 **FPN decoder · pretrained encoder · augmentation · scheduler · combined loss**가 동시에 변경되었습니다.
 
-- FPN decoder
-- pretrained encoder
-- augmentation
-- scheduler
-- combined loss
-
-가 동시에 변경되었습니다.
-
-즉,
-
-> **"성능은 좋아졌지만, 무엇이 실제 성능 향상에 기여했는지는 아직 분리되지 않았다"**
-
+즉, **"성능은 좋아졌지만, 무엇이 실제 성능 향상에 기여했는지는 아직 분리되지 않았다"**
 는 attribution limitation이 발생했습니다.
 
-이를 해결하기 위해 **Stage 2+ decoder isolation experiment**를 추가 설계했습니다.
+> 이를 해결하기 위해 **Stage 2+ decoder isolation experiment**를 추가 설계했습니다.
 
 ---
 
@@ -439,35 +428,36 @@ Stage 2+에서는 **decoder만 변경**했습니다.
 
 ### 구조적 해석
 
-Stage 2+ 결과에서 **Pole, SignSymbol, Pedestrian**과 같은 class의 성능 향상이 집중적으로 나타났습니다.
+Stage 2+ 결과에서 **Pole · SignSymbol · Pedestrian**과 같은 class의 성능 향상이 집중적으로 나타났습니다.
 
-이는 **FPN decoder의 multi-scale feature fusion과 top-down semantic propagation**이  
-high-resolution feature의 semantic consistency를 보완했을 가능성과 연결됩니다.
+이는 <b>FPN decoder의 multi-scale feature fusion(다중 스케일 특징 융합)</b>과  
+<b>top-down semantic propagation(상위 semantic 정보 전달)</b>이  
+high-resolution feature의 semantic consistency(의미 정보 일관성)를 보완했을 가능성과 연결됩니다.
 
-다시 말해, shallow feature에서 부족할 수 있는 semantic context를  
+다시 말해, shallow feature에서 부족할 수 있는 semantic context(의미 정보)를  
 deep feature가 보완하면서 다음 요소에 도움을 주었을 가능성이 있습니다.
 
-- small object continuity
-- thin boundary preservation
+- small object continuity(작은 객체의 연속성 유지)
+- thin boundary preservation(얇은 경계 정보 보존)
 
 ---
 
-## Failure Case 분석(Failure Case Analysis)
+## 실패 사례 분석(Failure Case Analysis)
 
 FPN decoder는 대부분의 작고 얇은 객체 class에서 성능 향상을 보였지만,  
-**Bicyclist class에서는 오히려 성능이 감소**했습니다.
+<b>Bicyclist class에서는 오히려 성능이 감소</b>했습니다.
 
 | Class | MLP | FPN | Δ |
 |---|---:|---:|---:|
-| Bicyclist | **0.6425** | 0.6222 | **-0.0203** |
+| Bicyclist | <b>0.6425</b> | 0.6222 | <b>-0.0203</b> |
 
 이 결과는 다음 가능성을 시사합니다.
 
-- FPN feature fusion이 모든 class에 동일하게 유리하지 않을 수 있음
-- 특정 object structure 또는 class distribution에서는 negative interaction이 발생할 수 있음
+- FPN 기반 feature fusion이 모든 class에 동일하게 유리하지 않을 수 있음
+- 특정 객체 구조(object structure) 또는 class 분포(class distribution)에서는 negative interaction(부정적 상호작용)이 발생할 수 있음
 
-> 즉, FPN decoder의 효과는 모든 class에서 동일하게 나타나는 universal improvement라기보다,  
-> 특정 object characteristic과 더 강하게 연결된 현상으로 해석했습니다.
+> 즉, FPN decoder의 효과는 모든 class에서 동일하게 나타나는 보편적 성능 향상이라기보다,  
+> 특정 객체 특성(object characteristic)과 더 강하게 연결된 현상으로 해석했습니다.
 
 ---
 
