@@ -36,9 +36,9 @@ flowchart TB
 
 | 실험 | 목적 | 결과 |
 |---|---|---|
-| Stage 1 | decoder/loss 단일 변수 비교 | FPN +0.0147 mIoU |
-| Stage 2 | 성능 향상 요소 조합 | E5 +0.1890 mIoU |
-| Stage 2+ | decoder 효과 분리 검증 | FPN +0.0176 mIoU |
+| Stage 1 | decoder/loss 단일 변수 비교 | FPN **+0.0147 mIoU** |
+| Stage 2 | 성능 향상 요소 조합 | E5 **+0.1890 mIoU** |
+| Stage 2+ | decoder 효과 분리 검증 | FPN **+0.0176 mIoU** |
 | 주요 분석 | class-wise / failure case 분석 | 작고 얇은 객체 중심 개선 |
 | 핵심 고민 | 성능 향상 원인 분리의 한계 | decoder isolation 실험 추가 설계 |
 
